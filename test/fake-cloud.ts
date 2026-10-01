@@ -8,6 +8,8 @@ export interface FakeState {
   /** Make the next N redeploys fail. */
   failDeploys: number;
   healthy: boolean;
+  /** Variable names whose values the fake API hides (Vercel "sensitive" type). */
+  sensitive: Set<string>;
   calls: string[];
 }
 
@@ -18,6 +20,7 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
     deployments: [{ id: "dpl_0", state: "READY" }],
     failDeploys: 0,
     healthy: true,
+    sensitive: new Set(),
     calls: [],
   };
 
@@ -52,7 +55,10 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
 
     // ---- Vercel
     if (url.hostname === "api.vercel.com") {
-      if (/\/v10\/projects\/[^/]+\/env$/.test(url.pathname)) return json({ envs: [...state.env.values()] });
+      if (/\/v10\/projects\/[^/]+\/env$/.test(url.pathname)) {
+        // "sensitive" variables come back without their value, like the real API
+        return json({ envs: [...state.env.values()].map((e) => (state.sensitive.has(e.key) ? { ...e, value: undefined, type: "sensitive" } : e)) });
+      }
       const envOne = /\/v9\/projects\/[^/]+\/env\/([^/]+)$/.exec(url.pathname);
       if (envOne && method === "PATCH") {
         const e = [...state.env.values()].find((x) => x.id === envOne[1]);

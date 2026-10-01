@@ -34,6 +34,9 @@ export interface Credentials {
 /** A secret leakfix can rotate on its own. */
 interface Rotation {
   envKey: string;
+  /** The leaked value as found in the repo: the fallback for rollback when the
+   *  platform won't reveal the current value (e.g. Vercel "sensitive" variables). */
+  oldValue: string;
   label: string;
   prepare: Step;          // mints the new value
   newValue: () => string; // available after prepare ran
@@ -71,6 +74,7 @@ function mongoRotation(f: Finding, cfg: Config, atlas: AtlasClient): Rotation {
   const groupId = cfg.atlas!.groupId;
   return {
     envKey: f.key!,
+    oldValue: f.value,
     label: `${f.key} (MongoDB Atlas user ${old.username})`,
     newValue: () => buildMongoUri(old, newUser, newPassword),
     prepare: {
@@ -97,6 +101,7 @@ function jwtRotation(f: Finding): Rotation {
   const value = randomBytes(48).toString("base64url");
   return {
     envKey: f.key!,
+    oldValue: f.value,
     label: `${f.key} (JWT signing secret)`,
     newValue: () => value,
     prepare: { title: `Generate a new random ${f.key}`, run: async () => {} },
@@ -148,10 +153,14 @@ export function buildPlans(findings: Finding[], cfg: Config, creds: Credentials,
       async run() {
         const entries = await vercel.findEnv(project, r.envKey);
         if (!entries.length) throw new Error(`${r.envKey} is not set for production on Vercel project ${project}`);
+        // Remember what to restore on rollback. Never restore an empty value:
+        // if the platform hides the current one, use the leaked value from the repo.
         for (const e of entries) {
-          previous.push({ id: e.id, value: e.value ?? "" });
-          await vercel.setEnv(project, e.id, r.newValue());
+          const value = e.value || r.oldValue;
+          if (!value) throw new Error(`Cannot read the current value of ${r.envKey}; refusing to change it without a way back`);
+          previous.push({ id: e.id, value });
         }
+        for (const e of entries) await vercel.setEnv(project, e.id, r.newValue());
       },
       async undo() {
         for (const p of previous) await vercel.setEnv(project, p.id, p.value);

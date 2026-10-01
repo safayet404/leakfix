@@ -128,6 +128,18 @@ describe("rotation", () => {
     expect(redeploys[1]!).toBeLessThan(cleanup);
   });
 
+  it("restores the real previous value on rollback even when Vercel hides it (sensitive variables)", async () => {
+    const { state, fetchImpl } = setup();
+    state.sensitive.add("MONGODB_URI");
+    state.sensitive.add("JWT_SECRET");
+    state.failDeploys = 1;
+    const result = await execute(buildPlans(leaked(), cfg, creds, fetchImpl).plans[0]!);
+
+    expect(result.ok).toBe(false);
+    expect(state.env.get("MONGODB_URI")!.value).toBe(LEAKED_URI);                // not ""
+    expect(state.env.get("JWT_SECRET")!.value).toBe("leakedjwtsecret123");
+  });
+
   it("never rolls back to the leaked credential once the new one is live", async () => {
     const { state, fetchImpl } = setup();
     const plan = buildPlans(leaked(), cfg, creds, fetchImpl).plans[0]!;
