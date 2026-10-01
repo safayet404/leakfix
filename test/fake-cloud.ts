@@ -4,7 +4,9 @@
 export interface FakeState {
   atlasUsers: Map<string, { roles: unknown[]; password: string }>;
   env: Map<string, { id: string; key: string; value: string; target: string[] }>;
-  deployments: { id: string; state: string }[];
+  deployments: { id: string; state: string; errorCode?: string; gitSource?: GitSource }[];
+  /** Body of every deploy request leakfix sent. */
+  deployRequests: Record<string, unknown>[];
   /** Make the next N redeploys fail. */
   failDeploys: number;
   healthy: boolean;
@@ -13,11 +15,16 @@ export interface FakeState {
   calls: string[];
 }
 
+interface GitSource { type: string; repoId: number; ref: string; sha: string }
+const GIT: GitSource = { type: "github", repoId: 4242, ref: "main", sha: "abc123" };
+
 export function fakeCloud(init: { users: Record<string, string>; env: Record<string, string> }) {
   const state: FakeState = {
     atlasUsers: new Map(Object.entries(init.users).map(([u, p]) => [u, { roles: [{ roleName: "readWrite", databaseName: "app" }], password: p }])),
     env: new Map(Object.entries(init.env).map(([k, v], i) => [k, { id: `env${i}`, key: k, value: v, target: ["production"] }])),
-    deployments: [{ id: "dpl_0", state: "READY" }],
+    // Production was built from GitHub, like most Vercel projects.
+    deployments: [{ id: "dpl_0", state: "READY", gitSource: GIT }],
+    deployRequests: [],
     failDeploys: 0,
     healthy: true,
     sensitive: new Set(),
@@ -72,15 +79,23 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
       }
       if (url.pathname === "/v13/deployments" && method === "POST") {
         const id = `dpl_${state.deployments.length}`;
+        state.deployRequests.push(body);
+        // Like the real API: a redeploy of a git-built deployment that only names the old
+        // deployment (no gitSource) fails with git_info_fail.
+        const gitSource = body.gitSource as GitSource | undefined;
+        if (!gitSource) {
+          state.deployments.push({ id, state: "ERROR", errorCode: "git_info_fail" });
+          return json({ id, readyState: "QUEUED" });
+        }
         const fail = state.failDeploys > 0;
         if (fail) state.failDeploys--;
-        state.deployments.push({ id, state: fail ? "ERROR" : "READY" });
+        state.deployments.push({ id, state: fail ? "ERROR" : "READY", gitSource });
         return json({ id, readyState: "QUEUED" });
       }
       const dep = /\/v13\/deployments\/([^/]+)$/.exec(url.pathname);
       if (dep) {
         const d = state.deployments.find((x) => x.id === dep[1]);
-        return d ? json({ id: d.id, readyState: d.state }) : json({ error: { message: "not found" } }, 404);
+        return d ? json({ id: d.id, readyState: d.state, errorCode: d.errorCode, gitSource: d.gitSource }) : json({ error: { message: "not found" } }, 404);
       }
     }
 

@@ -17,6 +17,9 @@ interface Deployment {
   id: string;
   url?: string;
   readyState?: "QUEUED" | "BUILDING" | "ERROR" | "INITIALIZING" | "READY" | "CANCELED";
+  errorCode?: string;
+  errorMessage?: string;
+  gitSource?: { type?: string; repoId?: number | string; ref?: string; sha?: string };
   target?: string | null;
 }
 
@@ -66,9 +69,16 @@ export class VercelClient {
 
   /** Redeploy the current production deployment so it picks up new env values. */
   async redeploy(project: string): Promise<Deployment> {
-    const current = await this.latestProductionDeployment(project);
+    const latest = await this.latestProductionDeployment(project);
+    const current = await request<Deployment>(this.fetchImpl, "Vercel", this.url(`/v13/deployments/${latest.id}`), { headers: this.headers() });
+    // A deployment built from Git must be redeployed from the same commit: naming only the
+    // old deployment makes Vercel fail with git_info_fail.
+    const g = current.gitSource;
+    const source = g?.type && g.repoId && g.sha
+      ? { gitSource: { type: g.type, repoId: g.repoId, ref: g.ref, sha: g.sha } }
+      : { deploymentId: latest.id };
     return request<Deployment>(this.fetchImpl, "Vercel", this.url("/v13/deployments", { forceNew: "1" }), {
-      method: "POST", headers: this.headers(), json: { name: project, deploymentId: current.id, target: "production" },
+      method: "POST", headers: this.headers(), json: { name: project, project, target: "production", ...source },
     });
   }
 
@@ -77,7 +87,10 @@ export class VercelClient {
     while (Date.now() < deadline) {
       const d = await request<Deployment>(this.fetchImpl, "Vercel", this.url(`/v13/deployments/${deploymentId}`), { headers: this.headers() });
       if (d.readyState === "READY") return d;
-      if (d.readyState === "ERROR" || d.readyState === "CANCELED") throw new Error(`Deployment ${deploymentId} ended in ${d.readyState}`);
+      if (d.readyState === "ERROR" || d.readyState === "CANCELED") {
+        const why = [d.errorCode, d.errorMessage].filter(Boolean).join(": ");
+        throw new Error(`Deployment ${deploymentId} ended in ${d.readyState}${why ? ` (${why})` : ""}; build logs: https://vercel.com/deployments/${deploymentId}`);
+      }
       await sleep(this.pollMs);
     }
     throw new Error(`Deployment ${deploymentId} was not ready after ${Math.round(timeoutMs / 60000)} min`);

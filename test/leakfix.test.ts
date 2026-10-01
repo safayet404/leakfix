@@ -97,6 +97,15 @@ describe("rotation", () => {
     expect(health).toBeLessThan(revoke);
   });
 
+  it("redeploys a Git-built production from the same commit", async () => {
+    const { state, fetchImpl } = setup();
+    const result = await execute(buildPlans(leaked(), cfg, creds, fetchImpl).plans[0]!);
+
+    expect(result.ok).toBe(true);
+    expect(state.deployRequests).toHaveLength(1);
+    expect(state.deployRequests[0]!.gitSource).toEqual({ type: "github", repoId: 4242, ref: "main", sha: "abc123" });
+  });
+
   it("rolls everything back when the new deployment fails, and production stays on the old credentials", async () => {
     const { state, fetchImpl } = setup();
     state.failDeploys = 1;
