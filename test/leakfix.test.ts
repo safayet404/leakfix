@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { mask, scanRepo, scanText, type Finding } from "../src/detect/scan.js";
 import { execute } from "../src/engine/plan.js";
+import { init } from "../src/engine/init.js";
 import { fixRepo } from "../src/engine/repo.js";
 import { buildPlans } from "../src/engine/rotations.js";
 import { fakeCloud } from "./fake-cloud.js";
@@ -195,5 +196,52 @@ describe("repository clean-up", () => {
     expect(example).not.toContain("S3cretPass");
     expect(existsSync(join(dir, ".env"))).toBe(true);                            // file kept on disk
     expect(scanRepo(dir).filter((f) => f.tracked)).toHaveLength(0);
+  });
+});
+
+describe("init", () => {
+  const root = "/work/collabify-backend";
+
+  it("finds the Vercel project, health URL and Atlas project on its own", async () => {
+    const { fetchImpl } = setup();
+    const result = await init({ root, leaked: leaked(), existing: {}, creds, gitRepo: "safayet404/collabify-backend", fetchImpl });
+
+    expect(result.ready).toBe(true);
+    expect(result.config).toEqual({
+      vercel: { project: "collabify-backend" },
+      healthUrl: "https://app.example.com/api/health",
+      atlas: { groupId: "g1" },
+    });
+  });
+
+  it("says exactly where to get missing credentials, without calling Vercel or Atlas", async () => {
+    const { state, fetchImpl } = setup();
+    const result = await init({ root, leaked: leaked(), existing: {}, creds: {}, fetchImpl });
+
+    expect(result.ready).toBe(false);
+    const text = JSON.stringify(result.checks);
+    expect(text).toContain("vercel.com/account/settings/tokens");
+    expect(text).toContain("Project Database Access Admin");
+    expect(text).toContain("203.0.113.0/24");                                   // this computer's IP range
+    expect(state.calls.filter((c) => c.includes("vercel.com") || c.includes("mongodb.com"))).toEqual([]);
+  });
+
+  it("explains an Atlas IP block with the range to allow", async () => {
+    const { state, fetchImpl } = setup();
+    state.atlasBlockedIp = "113.212.108.26";
+    const result = await init({ root, leaked: leaked(), existing: {}, creds, gitRepo: "safayet404/collabify-backend", fetchImpl });
+
+    expect(result.ready).toBe(false);
+    const blocked = result.checks.find((c) => c.label.includes("blocks this computer"))!;
+    expect(blocked.fix!.join(" ")).toContain("113.212.108.0/24");
+  });
+
+  it("keeps settings already in leakfix.config.json", async () => {
+    const { fetchImpl } = setup();
+    const existing = { vercel: { project: "collabify-backend" }, atlas: { groupId: "g1" }, healthUrl: "https://app.example.com/api/health" };
+    const result = await init({ root, leaked: leaked(), existing, creds, fetchImpl });
+
+    expect(result.ready).toBe(true);
+    expect(result.config).toEqual(existing);
   });
 });

@@ -64,7 +64,31 @@ pnpm install
 pnpm dev scan ../my-api            # or: pnpm build && node dist/cli.js scan ../my-api
 ```
 
-`leakfix.config.json` in the repo you rotate:
+Then let leakfix find the rest:
+
+```bash
+pnpm dev init ../my-api
+```
+
+```
+✓ Committed secrets to rotate: MONGODB_URI, JWT_SECRET, JWT_REFRESH_SECRET
+✓ Vercel token works (signed in as you)
+✓ Vercel project: my-api (deploys you/my-api)
+✓ Set for production on Vercel: MONGODB_URI, JWT_SECRET, JWT_REFRESH_SECRET
+✓ Health check: https://my-api.vercel.app/health → 200
+✓ Atlas project: my-project (cluster Cluster0)
+✓ Atlas service account can manage database user app
+Wrote ../my-api/leakfix.config.json (no secrets in it; safe to commit)
+Ready. Next: leakfix rotate shows the plan; leakfix rotate --yes runs it.
+```
+
+`init` only reads. It finds the Vercel project from `.vercel/project.json` or the
+git remote, the Atlas project from the cluster in your connection string, and a
+health route on the project's domain. Anything missing comes with the exact
+fix: where to create the token, which Atlas role to pick, and which IP range to
+allow (a `/24`, so a home ISP changing your IP doesn't break it).
+
+The config it writes looks like this, if you'd rather write it yourself:
 
 ```json
 {
@@ -84,6 +108,7 @@ Credentials come only from the environment, never from the repo:
 Then:
 
 ```bash
+leakfix init                # find projects, check access, write leakfix.config.json
 leakfix rotate              # dry run: prints the plan
 leakfix rotate --yes        # do it
 leakfix fix-repo            # stop tracking .env files, add .gitignore entries and .env.example

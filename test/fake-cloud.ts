@@ -13,6 +13,8 @@ export interface FakeState {
   /** Variable names whose values the fake API hides (Vercel "sensitive" type). */
   sensitive: Set<string>;
   calls: string[];
+  /** Atlas answers 403 "IP address … is not allowed" for this caller IP. */
+  atlasBlockedIp?: string;
 }
 
 interface GitSource { type: string; repoId: number; ref: string; sha: string }
@@ -45,6 +47,15 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
     // ---- Atlas
     if (url.hostname === "cloud.mongodb.com") {
       if (url.pathname === "/api/oauth/token") return json({ access_token: "tok", expires_in: 3600 });
+      if (state.atlasBlockedIp) return json({ detail: `IP address ${state.atlasBlockedIp} is not allowed to access this resource.` }, 403);
+      if (url.pathname === "/api/atlas/v2/groups") return json({ results: [{ id: "g0", name: "playground" }, { id: "g1", name: "collabify" }] });
+      const clusters = /\/groups\/([^/]+)\/clusters$/.exec(url.pathname);
+      if (clusters) {
+        const results = clusters[1] === "g1"
+          ? [{ name: "Cluster0", connectionStrings: { standardSrv: "mongodb+srv://cluster0.ab12c.mongodb.net" } }]
+          : [{ name: "Sandbox", connectionStrings: { standardSrv: "mongodb+srv://sandbox.zz99.mongodb.net" } }];
+        return json({ results });
+      }
       const one = /\/groups\/[^/]+\/databaseUsers\/admin\/([^/]+)$/.exec(url.pathname);
       if (one) {
         const name = decodeURIComponent(one[1]!);
@@ -62,6 +73,17 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
 
     // ---- Vercel
     if (url.hostname === "api.vercel.com") {
+      if (url.pathname === "/v2/user") return json({ user: { username: "safayet404" } });
+      if (url.pathname === "/v2/teams") return json({ teams: [] });
+      if (url.pathname === "/v9/projects") {
+        return json({ projects: [
+          { id: "prj_1", name: "portfolio", link: { type: "github", org: "safayet404", repo: "svelte-portfolio" } },
+          { id: "prj_2", name: "collabify-backend", link: { type: "github", org: "safayet404", repo: "collabify-backend" } },
+        ] });
+      }
+      if (/\/v9\/projects\/[^/]+\/domains$/.test(url.pathname)) {
+        return json({ domains: [{ name: "www.app.example.com", redirect: "app.example.com" }, { name: "app.example.com", redirect: null }] });
+      }
       if (/\/v10\/projects\/[^/]+\/env$/.test(url.pathname)) {
         // "sensitive" variables come back without their value, like the real API
         return json({ envs: [...state.env.values()].map((e) => (state.sensitive.has(e.key) ? { ...e, value: undefined, type: "sensitive" } : e)) });
@@ -100,6 +122,8 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
     }
 
     // ---- the app's health endpoint
+    if (url.hostname === "api.ipify.org") return json({ ip: "203.0.113.7" });
+    if (url.hostname === "app.example.com" && url.pathname !== "/api/health") return json({ error: "not found" }, 404);
     if (url.hostname === "app.example.com") return state.healthy ? json({ ok: true }) : json({ error: "db down" }, 503);
 
     return json({ error: `unmocked ${method} ${url}` }, 500);

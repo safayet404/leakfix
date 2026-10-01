@@ -17,6 +17,11 @@ export interface DatabaseUser {
   description?: string;
 }
 
+export interface AtlasCluster {
+  name: string;
+  connectionStrings?: { standardSrv?: string; standard?: string };
+}
+
 export class AtlasClient {
   private token?: { value: string; expires: number };
 
@@ -44,6 +49,15 @@ export class AtlasClient {
       headers: { Authorization: `Bearer ${await this.auth()}`, Accept: ACCEPT, ...(json ? { "Content-Type": ACCEPT } : {}) },
       ...(json !== undefined ? { body: JSON.stringify(json) } : {}),
     });
+  }
+
+  /** Projects ("groups") the service account can see. */
+  async listProjects(): Promise<{ id: string; name: string }[]> {
+    return (await this.call<{ results: { id: string; name: string }[] }>("GET", "/groups?itemsPerPage=500")).results;
+  }
+
+  async listClusters(groupId: string): Promise<AtlasCluster[]> {
+    return (await this.call<{ results: AtlasCluster[] }>("GET", `/groups/${groupId}/clusters?itemsPerPage=500`)).results;
   }
 
   getUser(groupId: string, username: string, databaseName = "admin") {

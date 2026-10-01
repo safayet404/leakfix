@@ -2,6 +2,7 @@
 // leakfix: rotate leaked secrets without downtime.
 //
 //   leakfix scan [dir]                  find secrets and whether git tracks them
+//   leakfix init [dir]                  find the Vercel/Atlas projects, check access, write the config
 //   leakfix rotate [dir]                show the rotation plan (dry run)
 //   leakfix rotate [dir] --yes          run it
 //   leakfix fix-repo [dir]              untrack .env files, ignore them, add .env.example
@@ -10,12 +11,14 @@
 //   LEAKFIX_VERCEL_TOKEN, LEAKFIX_ATLAS_CLIENT_ID, LEAKFIX_ATLAS_CLIENT_SECRET
 // Project settings live in leakfix.config.json (see README).
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { scanRepo } from "./detect/scan.js";
 import { execute } from "./engine/plan.js";
+import { init } from "./engine/init.js";
 import { fixRepo } from "./engine/repo.js";
 import { buildPlans, describeFinding, type Config } from "./engine/rotations.js";
 
@@ -24,11 +27,27 @@ const c = {
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`, dim: (s: string) => `\x1b[2m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
 };
 
+const configFile = (root: string, path?: string) => (path ? resolve(path) : join(root, "leakfix.config.json"));
+
 function loadConfig(root: string, path?: string): Config {
-  const file = path ? resolve(path) : join(root, "leakfix.config.json");
+  const file = configFile(root, path);
   if (!existsSync(file)) return {};
   return JSON.parse(readFileSync(file, "utf8")) as Config;
 }
+
+/** "owner/repo" of the origin remote, if it is a GitHub-style URL. */
+function gitRepo(root: string): string | undefined {
+  try {
+    const url = execFileSync("git", ["-C", root, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return /[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(url)?.[1];
+  } catch { return undefined; }
+}
+
+const credentials = () => ({
+  vercelToken: process.env.LEAKFIX_VERCEL_TOKEN,
+  atlasClientId: process.env.LEAKFIX_ATLAS_CLIENT_ID,
+  atlasClientSecret: process.env.LEAKFIX_ATLAS_CLIENT_SECRET,
+});
 
 async function main() {
   const { values, positionals } = parseArgs({
@@ -42,8 +61,8 @@ async function main() {
   const [command = "scan", dir = "."] = positionals;
   const root = resolve(dir);
 
-  if (values.help || !["scan", "rotate", "fix-repo"].includes(command)) {
-    console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1, 13).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  if (values.help || !["scan", "init", "rotate", "fix-repo"].includes(command)) {
+    console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1, 14).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
     return;
   }
 
@@ -73,13 +92,30 @@ async function main() {
     return;
   }
 
+  if (command === "init") {
+    const existing = loadConfig(root, values.config);
+    console.log(c.bold("leakfix init") + c.dim("  (reads only; changes nothing on Vercel or Atlas)\n"));
+    const result = await init({ root, leaked, existing, creds: credentials(), gitRepo: gitRepo(root) });
+    for (const check of result.checks) {
+      const mark = { ok: c.green("✓"), warn: c.yellow("!"), todo: c.red("✗") }[check.status];
+      console.log(`${mark} ${check.label}`);
+      for (const line of check.fix ?? []) console.log(c.dim(`    → ${line}`));
+    }
+    if (JSON.stringify(result.config) !== JSON.stringify(existing)) {
+      const file = configFile(root, values.config);
+      writeFileSync(file, JSON.stringify(result.config, null, 2) + "\n");
+      console.log(`\nWrote ${file} ${c.dim("(no secrets in it; safe to commit)")}`);
+    }
+    console.log(result.ready
+      ? `\n${c.green("Ready.")} Next: ${c.bold("leakfix rotate")} shows the plan; ${c.bold("leakfix rotate --yes")} runs it.`
+      : `\n${c.red("Not ready yet.")} Fix the ✗ items, then run ${c.bold("leakfix init")} again.`);
+    process.exitCode = result.ready ? 0 : 1;
+    return;
+  }
+
   // rotate
   const cfg = loadConfig(root, values.config);
-  const { plans, manual } = buildPlans(leaked, cfg, {
-    vercelToken: process.env.LEAKFIX_VERCEL_TOKEN,
-    atlasClientId: process.env.LEAKFIX_ATLAS_CLIENT_ID,
-    atlasClientSecret: process.env.LEAKFIX_ATLAS_CLIENT_SECRET,
-  });
+  const { plans, manual } = buildPlans(leaked, cfg, credentials());
 
   if (!leaked.length) return console.log(c.green("No committed secrets to rotate."));
   for (const plan of plans) {

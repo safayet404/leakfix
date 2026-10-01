@@ -13,6 +13,13 @@ export interface EnvVar {
   type: string;
 }
 
+export interface VercelProject {
+  id: string;
+  name: string;
+  /** The Git repository the project deploys from, if any. */
+  link?: { type?: string; org?: string; repo?: string };
+}
+
 interface Deployment {
   id: string;
   url?: string;
@@ -39,6 +46,26 @@ export class VercelClient {
 
   private headers() {
     return { Authorization: `Bearer ${this.token}` };
+  }
+
+  /** Who the token belongs to: a cheap way to check that it works. */
+  async user(): Promise<{ username: string }> {
+    return (await request<{ user: { username: string } }>(this.fetchImpl, "Vercel", this.url("/v2/user"), { headers: this.headers() })).user;
+  }
+
+  async teams(): Promise<{ id: string; slug: string }[]> {
+    return (await request<{ teams: { id: string; slug: string }[] }>(this.fetchImpl, "Vercel", this.url("/v2/teams"), { headers: this.headers() })).teams;
+  }
+
+  async projects(): Promise<VercelProject[]> {
+    return (await request<{ projects: VercelProject[] }>(this.fetchImpl, "Vercel", this.url("/v9/projects", { limit: "100" }), { headers: this.headers() })).projects;
+  }
+
+  /** The project's own domains (not redirects), e.g. my-api.vercel.app. */
+  async domains(project: string): Promise<string[]> {
+    const res = await request<{ domains: { name: string; redirect?: string | null }[] }>(this.fetchImpl, "Vercel",
+      this.url(`/v9/projects/${encodeURIComponent(project)}/domains`), { headers: this.headers() });
+    return res.domains.filter((d) => !d.redirect).map((d) => d.name);
   }
 
   async listEnv(project: string): Promise<EnvVar[]> {
