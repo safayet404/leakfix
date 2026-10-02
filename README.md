@@ -63,7 +63,7 @@ Every step is written to `leakfix-audit.jsonl`. The log never contains secret va
 | Deployment | |
 |---|---|
 | Vercel | ✅ env vars + production redeploy (used on a real production app) |
-| Render | 🧪 env vars + deploy (tested against a simulated API; reports from real use welcome) |
+| Render | ✅ env vars + deploy (rotation and rollback tested on a live Render service) |
 
 See the [roadmap](#roadmap) for what's next.
 

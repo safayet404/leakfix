@@ -98,7 +98,7 @@ async function main() {
 
   if (command === "init") {
     const existing = loadConfig(root, values.config);
-    console.log(c.bold("leakfix init") + c.dim("  (reads only; changes nothing on Vercel or Atlas)\n"));
+    console.log(c.bold("leakfix init") + c.dim("  (reads only; changes nothing on your accounts)\n"));
     const result = await init({ root, leaked, existing, creds: credentials(), gitRepo: gitRepo(root) });
     for (const check of result.checks) {
       const mark = { ok: c.green("✓"), warn: c.yellow("!"), todo: c.red("✗") }[check.status];

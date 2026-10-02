@@ -69,6 +69,11 @@ const LIKELY = /(?:^|\/)\.env(?:\.[\w.-]+)?$|\.(?:js|ts|mjs|cjs|json|ya?ml|toml|
  * which secrets exist, but only tracked ones count as leaked.
  */
 export function scanRepo(root: string): Finding[] {
+  try {
+    git(root, ["rev-parse", "--git-dir"]);
+  } catch {
+    throw new Error(`${root} is not a git repository. leakfix checks what git tracks; run it inside a repo (or \`git init\` first).`);
+  }
   const tracked = new Set(git(root, ["ls-files"]).split("\n").filter(Boolean));
   // Untracked .env files, whether git-ignored or not.
   const untrackedEnv = [

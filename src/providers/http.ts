@@ -26,7 +26,7 @@ export async function request<T>(
       const body = JSON.parse(text);
       detail = body.detail ?? body.error?.message ?? body.message ?? body.errorCode ?? detail;
     } catch { /* not JSON */ }
-    throw new HttpError(res.status, service, String(detail));
+    throw new HttpError(res.status, service, String(detail) || res.statusText || "no details");
   }
   return (text ? JSON.parse(text) : undefined) as T;
 }
