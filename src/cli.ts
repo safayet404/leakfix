@@ -62,7 +62,10 @@ async function main() {
   const root = resolve(dir);
 
   if (values.help || !["scan", "init", "rotate", "fix-repo"].includes(command)) {
-    console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1, 14).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+    // The usage text is the comment block at the top of this file (kept in the build).
+    const lines = readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1);
+    const usage = lines.slice(0, lines.findIndex((l) => !l.startsWith("//")));
+    console.log(usage.map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
     return;
   }
 

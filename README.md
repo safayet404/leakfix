@@ -1,5 +1,6 @@
 # leakfix
 
+[![npm](https://img.shields.io/npm/v/leakfix)](https://www.npmjs.com/package/leakfix)
 [![CI](https://github.com/safayet404/leakfix/actions/workflows/ci.yml/badge.svg)](https://github.com/safayet404/leakfix/actions/workflows/ci.yml)
 
 **Leaked a secret? leakfix replaces it without taking your app down.**
@@ -61,15 +62,18 @@ reacts to pushes and opens the clean-up PR, and an approval mode ("rotate?" → 
 
 ## Setup
 
+Needs Node.js 22 or newer. Nothing to install:
+
 ```bash
-pnpm install
-pnpm dev scan ../my-api            # or: pnpm build && node dist/cli.js scan ../my-api
+npx leakfix scan          # in your repo: which secrets are committed?
 ```
+
+Or install it: `npm i -g leakfix`.
 
 Then let leakfix find the rest:
 
 ```bash
-pnpm dev init ../my-api
+npx leakfix init
 ```
 
 ```
@@ -80,7 +84,7 @@ pnpm dev init ../my-api
 ✓ Health check: https://my-api.vercel.app/health → 200
 ✓ Atlas project: my-project (cluster Cluster0)
 ✓ Atlas service account can manage database user app
-Wrote ../my-api/leakfix.config.json (no secrets in it; safe to commit)
+Wrote ./leakfix.config.json (no secrets in it; safe to commit)
 Ready. Next: leakfix rotate shows the plan; leakfix rotate --yes runs it.
 ```
 
@@ -149,9 +153,14 @@ docker run --rm -v "$PWD:/repo" leakfix scan /repo
 ## Development
 
 ```bash
+pnpm install
+pnpm dev scan ../my-api   # run from source
 pnpm test        # runs whole rotations against an in-memory Atlas + Vercel, including failures
 pnpm typecheck
 ```
 
 CI runs the tests on Node 22 and 24, builds the Docker image, and scans this
 repo with it on every push.
+
+Releases: bump `version` in package.json, then push a matching tag (`git tag v0.2.0 && git push --tags`).
+CI publishes to npm with provenance and creates the GitHub release.
