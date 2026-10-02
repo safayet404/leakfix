@@ -1,5 +1,7 @@
 # leakfix
 
+[![CI](https://github.com/safayet404/leakfix/actions/workflows/ci.yml/badge.svg)](https://github.com/safayet404/leakfix/actions/workflows/ci.yml)
+
 **Leaked a secret? leakfix replaces it without taking your app down.**
 
 Finding a leaked `.env` is the easy part. GitHub and others will tell you about
@@ -120,9 +122,36 @@ line, or `leakfix:allow-file` in the first lines of a file full of test fixtures
 `fix-repo` doesn't rewrite history. The old file stays in past commits,
 which is why rotating is what actually protects you.
 
+## Block leaks in pull requests
+
+Add leakfix to any repo's CI. The check fails when a secret is committed, before it
+reaches `main`:
+
+```yaml
+# .github/workflows/leakfix.yml
+name: leakfix
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: safayet404/leakfix@main
+```
+
+Or run it in Docker, with nothing to install:
+
+```bash
+docker build -t leakfix https://github.com/safayet404/leakfix.git
+docker run --rm -v "$PWD:/repo" leakfix scan /repo
+```
+
 ## Development
 
 ```bash
 pnpm test        # runs whole rotations against an in-memory Atlas + Vercel, including failures
 pnpm typecheck
 ```
+
+CI runs the tests on Node 22 and 24, builds the Docker image, and scans this
+repo with it on every push.

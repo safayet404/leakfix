@@ -1,0 +1,14 @@
+name: leakfix scan
+description: Fail the check when a secret (.env, connection string, JWT secret...) is committed.
+author: Safayet Hossain
+branding:
+  icon: shield
+  color: red
+inputs:
+  path:
+    description: Folder to scan, relative to the repository root.
+    default: "."
+runs:
+  using: docker
+  image: Dockerfile
+  args: ["scan", "/github/workspace/${{ inputs.path }}"]
