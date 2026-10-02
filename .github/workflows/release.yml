@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write   # create the GitHub release
-  id-token: write   # npm provenance: proves the package was built from this repo
+  id-token: write   # npm Trusted Publishing: no npm token is stored anywhere
 
 jobs:
   publish:
@@ -24,9 +24,16 @@ jobs:
       - name: Tag matches package.json
         run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
       - run: pnpm typecheck && pnpm test && pnpm build
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted Publishing (set up once on npmjs.com → leakfix → Settings) signs
+      # the package with provenance. Skip if this version is already on npm.
+      - name: Publish to npm
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if npm view "leakfix@$version" version >/dev/null 2>&1; then
+            echo "leakfix@$version is already on npm"
+          else
+            npm publish --access public
+          fi
       - run: gh release create "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

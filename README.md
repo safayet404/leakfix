@@ -163,4 +163,4 @@ CI runs the tests on Node 22 and 24, builds the Docker image, and scans this
 repo with it on every push.
 
 Releases: bump `version` in package.json, then push a matching tag (`git tag v0.2.0 && git push --tags`).
-CI publishes to npm with provenance and creates the GitHub release.
+CI publishes to npm through Trusted Publishing (no stored token, signed provenance) and creates the GitHub release.
