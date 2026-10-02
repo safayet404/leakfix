@@ -5,6 +5,10 @@
 
 **Leaked a secret? leakfix replaces it without taking your app down.**
 
+![leakfix finds committed secrets, rolls back a failed rotation, then rotates them with zero downtime](docs/demo.gif)
+
+<sub>Recorded against simulated MongoDB Atlas and Vercel APIs (<a href="scripts/demo.ts">scripts/demo.ts</a>); the first deploy fails on purpose to show the rollback.</sub>
+
 Finding a leaked `.env` is the easy part. GitHub and others will tell you about
 it, and some providers revoke the key on the spot, which takes your app down.
 The hard part is the cleanup: mint a new credential, update the deployment,
