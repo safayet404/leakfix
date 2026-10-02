@@ -52,17 +52,20 @@ to finish by hand.
 
 Every step is written to `leakfix-audit.jsonl`. The log never contains secret values.
 
-## Supported (v0.1)
+## Supported
 
 | Secret | Rotation |
 |---|---|
 | MongoDB Atlas connection string | ✅ new database user, same roles; old user deleted |
 | JWT signing secrets | ✅ new random secret (users sign in again) |
-| Deployment | ✅ Vercel (env vars + production redeploy) |
 | SMTP passwords, other API keys | 📝 detected, with instructions to rotate by hand |
 
-Planned: Render and Railway deployments, Stripe, SendGrid and Resend keys, a GitHub App that
-reacts to pushes and opens the clean-up PR, and an approval mode ("rotate?" → one click).
+| Deployment | |
+|---|---|
+| Vercel | ✅ env vars + production redeploy (used on a real production app) |
+| Render | 🧪 env vars + deploy (tested against a simulated API; reports from real use welcome) |
+
+See the [roadmap](#roadmap) for what's next.
 
 ## Setup
 
@@ -108,11 +111,14 @@ The config it writes looks like this, if you'd rather write it yourself:
 }
 ```
 
+On Render, use `"render": { "serviceId": "srv-..." }` instead of `"vercel"`.
+
 Credentials come only from the environment, never from the repo:
 
 | Variable | Where to get it | Needs |
 |---|---|---|
 | `LEAKFIX_VERCEL_TOKEN` | vercel.com/account/tokens | access to the project's team |
+| `LEAKFIX_RENDER_API_KEY` | dashboard.render.com → Account Settings → API Keys | the service (instead of the Vercel token) |
 | `LEAKFIX_ATLAS_CLIENT_ID` / `LEAKFIX_ATLAS_CLIENT_SECRET` | Atlas → Organization → Access Manager → Service Accounts | permission to manage database users in the project |
 
 Then:
@@ -129,6 +135,32 @@ line, or `leakfix:allow-file` in the first lines of a file full of test fixtures
 
 `fix-repo` doesn't rewrite history. The old file stays in past commits,
 which is why rotating is what actually protects you.
+
+## Roadmap
+
+Ordered by how often each one leaks and how much damage it does. Want one sooner,
+or want to build one? Open an issue, or read [CONTRIBUTING.md](CONTRIBUTING.md):
+a new deployment platform is one file.
+
+**Deployments**
+- [x] Vercel
+- [x] Render
+- [ ] Railway
+- [ ] Netlify
+- [ ] Fly.io
+
+**Secrets**
+- [x] MongoDB Atlas users
+- [x] JWT signing secrets
+- [ ] Stripe secret keys (Stripe can roll a key with an expiry for the old one)
+- [ ] Resend / SendGrid API keys
+- [ ] Postgres users on Neon and Supabase
+- [ ] AWS access keys (IAM)
+
+**Workflow**
+- [ ] GitHub App: notices a pushed secret, asks "rotate?", then opens the clean-up PR
+- [ ] Approval mode for teams: plan in a PR comment, rotate on approval
+- [ ] Rotate several deployments that share a secret (e.g. API on Render, web on Vercel)
 
 ## Block leaks in pull requests
 
@@ -153,6 +185,11 @@ Or run it in Docker, with nothing to install:
 docker build -t leakfix https://github.com/safayet404/leakfix.git
 docker run --rm -v "$PWD:/repo" leakfix scan /repo
 ```
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how
+to add a deployment platform or a secret type, and how to test it without real accounts.
 
 ## Development
 

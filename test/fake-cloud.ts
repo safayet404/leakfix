@@ -15,6 +15,9 @@ export interface FakeState {
   calls: string[];
   /** Atlas answers 403 "IP address … is not allowed" for this caller IP. */
   atlasBlockedIp?: string;
+  /** Render service srv-1: its own variables and its deploys (failDeploys applies too). */
+  renderEnv: Map<string, string>;
+  renderDeploys: { id: string; status: string }[];
 }
 
 interface GitSource { type: string; repoId: number; ref: string; sha: string }
@@ -31,6 +34,8 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
     healthy: true,
     sensitive: new Set(),
     calls: [],
+    renderEnv: new Map(Object.entries(init.env)),
+    renderDeploys: [],
   };
 
   const json = (body: unknown, status = 200) =>
@@ -68,6 +73,37 @@ export function fakeCloud(init: { users: Record<string, string>; env: Record<str
         if (state.atlasUsers.has(body.username)) return json({ detail: "user exists" }, 409);
         state.atlasUsers.set(body.username, { roles: body.roles, password: body.password });
         return json({ ...body, password: undefined }, 201);
+      }
+    }
+
+    // ---- Render
+    if (url.hostname === "api.render.com") {
+      if (url.pathname === "/v1/services") {
+        return json([
+          { service: { id: "srv-2", name: "marketing-site", repo: "https://github.com/safayet404/landing" }, cursor: "a" },
+          { service: { id: "srv-1", name: "collabify-backend", repo: "https://github.com/safayet404/collabify-backend", serviceDetails: { url: "https://app.example.com" } }, cursor: "b" },
+        ]);
+      }
+      if (url.pathname === "/v1/services/srv-1/env-vars") {
+        return json([...state.renderEnv].map(([key, value]) => ({ envVar: { key, value }, cursor: key })));
+      }
+      const envVar = /^\/v1\/services\/srv-1\/env-vars\/([^/]+)$/.exec(url.pathname);
+      if (envVar && method === "PUT") {
+        const key = decodeURIComponent(envVar[1]!);
+        state.renderEnv.set(key, body.value);
+        return json({ key, value: body.value });
+      }
+      if (url.pathname === "/v1/services/srv-1/deploys" && method === "POST") {
+        const id = `dep-${state.renderDeploys.length + 1}`;
+        const fail = state.failDeploys > 0;
+        if (fail) state.failDeploys--;
+        state.renderDeploys.push({ id, status: fail ? "build_failed" : "live" });
+        return json({ id, status: "created" }, 201);
+      }
+      const deploy = /^\/v1\/services\/srv-1\/deploys\/([^/]+)$/.exec(url.pathname);
+      if (deploy) {
+        const d = state.renderDeploys.find((x) => x.id === deploy[1]);
+        return d ? json(d) : json({ message: "not found" }, 404);
       }
     }
 

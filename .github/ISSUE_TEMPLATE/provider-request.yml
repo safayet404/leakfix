@@ -1,0 +1,23 @@
+name: Support a platform or secret
+description: Ask leakfix to rotate a secret type or deploy to a platform it doesn't support yet.
+labels: ["provider"]
+body:
+  - type: input
+    id: what
+    attributes:
+      label: What should leakfix support?
+      placeholder: e.g. Railway deployments, Stripe secret keys
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup
+      description: Where your app runs and which secret leaked (or could). Never paste a real secret.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - "No, just asking"
+        - "Yes, with some guidance (see CONTRIBUTING.md)"

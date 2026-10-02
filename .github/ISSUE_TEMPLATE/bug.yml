@@ -1,0 +1,23 @@
+name: Bug report
+description: Something went wrong during scan, init or rotate.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "**Never paste secrets.** leakfix's own output masks them, so it is safe to paste."
+  - type: textarea
+    id: output
+    attributes:
+      label: Command and output
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: input
+    id: version
+    attributes:
+      label: leakfix version and platform
+      placeholder: "leakfix 0.2.0, Render, MongoDB Atlas"

@@ -7,6 +7,7 @@ import { basename, join } from "node:path";
 import type { Finding } from "../detect/scan.js";
 import { AtlasClient, parseMongoUri } from "../providers/atlas.js";
 import { HttpError, request, type Fetch } from "../providers/http.js";
+import { RenderClient } from "../providers/render.js";
 import { VercelClient, type VercelProject } from "../providers/vercel.js";
 import type { Config, Credentials } from "./rotations.js";
 
@@ -50,7 +51,10 @@ export async function init(input: InitInput): Promise<InitResult> {
   }
   checks.push({ status: "ok", label: `Committed secrets to rotate: ${keys.join(", ")}` });
 
-  await checkVercel(checks, config, keys, input, fetchImpl);
+  // Render when it's configured, or when only a Render key is available; Vercel otherwise.
+  const render = config.render || (!config.vercel && creds.renderApiKey && !creds.vercelToken);
+  if (render) await checkRender(checks, config, keys, input, fetchImpl);
+  else await checkVercel(checks, config, keys, input, fetchImpl);
   if (mongo) await checkAtlas(checks, config, mongo, creds, fetchImpl);
   return done();
 }
@@ -63,6 +67,7 @@ async function checkVercel(checks: Check[], config: Config, keys: string[], inpu
       fix: [
         "Create one at https://vercel.com/account/settings/tokens (an expiry of 1 day is enough).",
         `Then, in this terminal: ${hiddenExport("LEAKFIX_VERCEL_TOKEN")}`,
+        `Deployed on Render instead? Create an API key at https://dashboard.render.com/u/settings#api-keys, then: ${hiddenExport("LEAKFIX_RENDER_API_KEY")}`,
       ],
     });
     return;
@@ -114,7 +119,72 @@ async function checkVercel(checks: Check[], config: Config, keys: string[], inpu
     return;
   }
 
-  // A health URL lets leakfix notice a broken deploy before revoking the old credential.
+  let domains: string[] = [];
+  if (!config.healthUrl) try { domains = await vercel.domains(project); } catch { /* fall through to the warning */ }
+  await checkHealth(checks, config, domains, fetchImpl);
+}
+
+async function checkRender(checks: Check[], config: Config, keys: string[], input: InitInput, fetchImpl: Fetch) {
+  const { creds, gitRepo } = input;
+  if (!creds.renderApiKey) {
+    checks.push({
+      status: "todo", label: "No Render API key (LEAKFIX_RENDER_API_KEY)",
+      fix: [
+        "Create one at https://dashboard.render.com/u/settings#api-keys",
+        `Then, in this terminal: ${hiddenExport("LEAKFIX_RENDER_API_KEY")}`,
+      ],
+    });
+    return;
+  }
+  const render = new RenderClient(creds.renderApiKey, fetchImpl);
+
+  // Which service? Config first, then the one that deploys this repo.
+  let services;
+  try {
+    services = await render.services();
+    checks.push({ status: "ok", label: "Render API key works" });
+  } catch (err) {
+    checks.push({ status: "todo", label: `Render rejected the API key (${errText(err)})`, fix: ["Create a new one at https://dashboard.render.com/u/settings#api-keys"] });
+    return;
+  }
+  let service = config.render ? services.find((s) => s.id === config.render!.serviceId) : undefined;
+  if (config.render) {
+    checks.push(service
+      ? { status: "ok", label: `Render service: ${service.name} (from leakfix.config.json)` }
+      : { status: "todo", label: `The API key can't see Render service ${config.render.serviceId}`, fix: ["Check render.serviceId in leakfix.config.json (it starts with srv-)."] });
+    if (!service) return;
+  } else {
+    const repo = (gitRepo ?? "").toLowerCase();
+    const matches = repo ? services.filter((s) => s.repo?.toLowerCase().replace(/\.git$/, "").endsWith(`/${repo}`)) : [];
+    if (matches.length !== 1) {
+      checks.push({
+        status: "todo", label: matches.length ? `Several Render services deploy ${gitRepo}` : "Could not tell which Render service deploys this repo",
+        fix: [`Set "render": { "serviceId": "srv-..." } in leakfix.config.json. Your services: ${(matches.length ? matches : services).map((s) => `${s.name} (${s.id})`).slice(0, 15).join(", ")}`],
+      });
+      return;
+    }
+    service = matches[0]!;
+    config.render = { serviceId: service.id };
+    checks.push({ status: "ok", label: `Render service: ${service.name} (deploys ${gitRepo})` });
+  }
+
+  try {
+    const env = await render.listEnv(service.id);
+    const missing = keys.filter((k) => !env.some((e) => e.key === k));
+    checks.push(missing.length
+      ? { status: "todo", label: `Not set on the Render service: ${missing.join(", ")}`, fix: ["leakfix updates the service's own variables. Variables from an environment group must be rotated by hand for now."] }
+      : { status: "ok", label: `Set on the Render service: ${keys.join(", ")}` });
+  } catch (err) {
+    checks.push({ status: "todo", label: `Cannot read the service's environment variables (${errText(err)})` });
+    return;
+  }
+
+  const host = service.serviceDetails?.url?.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  await checkHealth(checks, config, host ? [host] : [], fetchImpl);
+}
+
+/** A health URL lets leakfix notice a broken deploy before revoking the old credential. */
+async function checkHealth(checks: Check[], config: Config, domains: string[], fetchImpl: Fetch) {
   if (config.healthUrl) {
     const status = await probe(config.healthUrl, fetchImpl);
     checks.push(status && status < 300
@@ -122,8 +192,6 @@ async function checkVercel(checks: Check[], config: Config, keys: string[], inpu
       : { status: "todo", label: `Health check ${config.healthUrl} answered ${status ?? "nothing"}`, fix: ["Fix the URL in leakfix.config.json, or remove healthUrl."] });
     return;
   }
-  let domains: string[] = [];
-  try { domains = await vercel.domains(project); } catch { /* fall through to the warning */ }
   for (const domain of domains) {
     for (const path of HEALTH_PATHS) {
       const url = `https://${domain}${path}`;

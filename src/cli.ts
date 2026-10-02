@@ -2,13 +2,13 @@
 // leakfix: rotate leaked secrets without downtime.
 //
 //   leakfix scan [dir]                  find secrets and whether git tracks them
-//   leakfix init [dir]                  find the Vercel/Atlas projects, check access, write the config
+//   leakfix init [dir]                  find the deployment and Atlas project, check access, write the config
 //   leakfix rotate [dir]                show the rotation plan (dry run)
 //   leakfix rotate [dir] --yes          run it
 //   leakfix fix-repo [dir]              untrack .env files, ignore them, add .env.example
 //
 // Credentials come from the environment, never from the repo:
-//   LEAKFIX_VERCEL_TOKEN, LEAKFIX_ATLAS_CLIENT_ID, LEAKFIX_ATLAS_CLIENT_SECRET
+//   LEAKFIX_VERCEL_TOKEN or LEAKFIX_RENDER_API_KEY, LEAKFIX_ATLAS_CLIENT_ID, LEAKFIX_ATLAS_CLIENT_SECRET
 // Project settings live in leakfix.config.json (see README).
 
 import { execFileSync } from "node:child_process";
@@ -45,6 +45,7 @@ function gitRepo(root: string): string | undefined {
 
 const credentials = () => ({
   vercelToken: process.env.LEAKFIX_VERCEL_TOKEN,
+  renderApiKey: process.env.LEAKFIX_RENDER_API_KEY,
   atlasClientId: process.env.LEAKFIX_ATLAS_CLIENT_ID,
   atlasClientSecret: process.env.LEAKFIX_ATLAS_CLIENT_SECRET,
 });

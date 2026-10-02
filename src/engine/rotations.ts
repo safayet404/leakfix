@@ -14,12 +14,14 @@ import { randomBytes } from "node:crypto";
 import type { Finding } from "../detect/scan.js";
 import { mask } from "../detect/scan.js";
 import { AtlasClient, buildMongoUri, parseMongoUri } from "../providers/atlas.js";
+import { renderTarget, vercelTarget, type DeployTarget, type EnvEntry } from "../providers/deploy.js";
 import { request, type Fetch } from "../providers/http.js";
-import { VercelClient } from "../providers/vercel.js";
 import type { Plan, Step } from "./plan.js";
 
 export interface Config {
+  /** The deployment to update: exactly one of vercel or render. */
   vercel?: { project: string; teamId?: string };
+  render?: { serviceId: string };
   atlas?: { groupId: string };
   /** Optional URL that returns 2xx only when the app (and its database) works. */
   healthUrl?: string;
@@ -27,6 +29,7 @@ export interface Config {
 
 export interface Credentials {
   vercelToken?: string;
+  renderApiKey?: string;
   atlasClientId?: string;
   atlasClientSecret?: string;
 }
@@ -110,8 +113,23 @@ function jwtRotation(f: Finding): Rotation {
   };
 }
 
+/** The configured deployment, or why there is none. */
+export function deployTarget(cfg: Config, creds: Credentials, fetchImpl: Fetch = fetch): DeployTarget | string {
+  if (cfg.vercel && cfg.render) return "both vercel and render are configured; leakfix updates one deployment at a time";
+  if (cfg.vercel) {
+    if (!creds.vercelToken) return "LEAKFIX_VERCEL_TOKEN is not set";
+    return vercelTarget(creds.vercelToken, cfg.vercel.project, cfg.vercel.teamId, fetchImpl);
+  }
+  if (cfg.render) {
+    if (!creds.renderApiKey) return "LEAKFIX_RENDER_API_KEY is not set";
+    return renderTarget(creds.renderApiKey, cfg.render.serviceId, fetchImpl);
+  }
+  return "no deployment configured (set vercel or render in leakfix.config.json; `leakfix init` can find it)";
+}
+
 export function buildPlans(findings: Finding[], cfg: Config, creds: Credentials, fetchImpl: Fetch = fetch): Built {
   const manual: ManualAction[] = [];
+  const target = deployTarget(cfg, creds, fetchImpl);
   const rotations: Rotation[] = [];
   const atlas = creds.atlasClientId && creds.atlasClientSecret
     ? new AtlasClient(creds.atlasClientId, creds.atlasClientSecret, fetchImpl) : undefined;
@@ -126,8 +144,8 @@ export function buildPlans(findings: Finding[], cfg: Config, creds: Credentials,
 
     if (!f.key) {
       manual.push({ finding: f, reason: "secret is written directly in code, not in an environment variable", howTo: `Move it to an environment variable, then: ${howTo}` });
-    } else if (!cfg.vercel || !creds.vercelToken) {
-      manual.push({ finding: f, reason: "no deployment configured (set vercel.project and LEAKFIX_VERCEL_TOKEN)", howTo });
+    } else if (typeof target === "string") {
+      manual.push({ finding: f, reason: target, howTo });
     } else if (f.kind === "mongodb-uri") {
       if (!atlas || !cfg.atlas) manual.push({ finding: f, reason: "no MongoDB Atlas access configured", howTo });
       else rotations.push(mongoRotation(f, cfg, atlas));
@@ -138,43 +156,38 @@ export function buildPlans(findings: Finding[], cfg: Config, creds: Credentials,
     }
   }
 
-  if (!rotations.length || !cfg.vercel || !creds.vercelToken) return { plans: [], manual };
+  if (!rotations.length || typeof target === "string") return { plans: [], manual };
 
-  const project = cfg.vercel.project;
-  const vercel = new VercelClient(creds.vercelToken, cfg.vercel.teamId, fetchImpl);
   const steps: Step[] = [];
 
   for (const r of rotations) steps.push(r.prepare);
 
   for (const r of rotations) {
-    const previous: { id: string; value: string }[] = [];
+    const previous: { entry: EnvEntry; value: string }[] = [];
     steps.push({
-      title: `Set ${r.envKey} on Vercel project ${project} (production)`,
+      title: `Set ${r.envKey} on ${target.name} (production)`,
       async run() {
-        const entries = await vercel.findEnv(project, r.envKey);
-        if (!entries.length) throw new Error(`${r.envKey} is not set for production on Vercel project ${project}`);
+        const entries = await target.findEnv(r.envKey);
+        if (!entries.length) throw new Error(`${r.envKey} is not set for production on ${target.name}`);
         // Remember what to restore on rollback. Never restore an empty value:
         // if the platform hides the current one, use the leaked value from the repo.
         for (const e of entries) {
           const value = e.value || r.oldValue;
           if (!value) throw new Error(`Cannot read the current value of ${r.envKey}; refusing to change it without a way back`);
-          previous.push({ id: e.id, value });
+          previous.push({ entry: e, value });
         }
-        for (const e of entries) await vercel.setEnv(project, e.id, r.newValue());
+        for (const e of entries) await target.setEnv(r.envKey, e, r.newValue());
       },
       async undo() {
-        for (const p of previous) await vercel.setEnv(project, p.id, p.value);
+        for (const p of previous) await target.setEnv(r.envKey, p.entry, p.value);
       },
     });
   }
 
   let rolledBack = false;
   steps.push({
-    title: `Redeploy ${project} to production and wait until it is ready`,
-    async run() {
-      const d = await vercel.redeploy(project);
-      await vercel.waitUntilReady(d.id);
-    },
+    title: `Redeploy ${target.name} to production and wait until it is ready`,
+    run: () => target.redeploy(),
     // The env was restored by the previous steps' undo, which run after this
     // one; a fresh redeploy is triggered once at the end of the rollback.
     async undo() {
@@ -200,10 +213,7 @@ export function buildPlans(findings: Finding[], cfg: Config, creds: Credentials,
   const first = steps[0]!;
   const originalUndo = first.undo;
   first.undo = async () => {
-    if (rolledBack) {
-      const d = await vercel.redeploy(project);
-      await vercel.waitUntilReady(d.id);
-    }
+    if (rolledBack) await target.redeploy();
     await originalUndo?.();
   };
 

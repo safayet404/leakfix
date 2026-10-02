@@ -250,3 +250,63 @@ describe("init", () => {
     expect(result.config).toEqual(existing);
   });
 });
+
+describe("Render", () => {
+  const renderCfg = { render: { serviceId: "srv-1" }, atlas: { groupId: "g1" }, healthUrl: "https://app.example.com/api/health" };
+  const renderCreds = { renderApiKey: "r", atlasClientId: "id", atlasClientSecret: "secret" };
+
+  it("rotates on a Render service with one deploy", async () => {
+    const { state, fetchImpl } = setup();
+    const { plans } = buildPlans(leaked(), renderCfg, renderCreds, fetchImpl);
+    const result = await execute(plans[0]!);
+
+    expect(result.ok).toBe(true);
+    expect(state.renderDeploys).toHaveLength(1);
+    expect(state.renderEnv.get("MONGODB_URI")).toContain("collabify-lf");
+    expect(state.renderEnv.get("JWT_SECRET")).not.toBe("leakedjwtsecret123");
+    expect(state.atlasUsers.has("collabify")).toBe(false);
+    expect(state.calls.some((c) => c.includes("vercel.com"))).toBe(false);
+  });
+
+  it("puts the old values back when the Render build fails (the previous deploy keeps serving)", async () => {
+    const { state, fetchImpl } = setup();
+    state.failDeploys = 1;
+    const result = await execute(buildPlans(leaked(), renderCfg, renderCreds, fetchImpl).plans[0]!);
+
+    expect(result.ok).toBe(false);
+    expect(result.rolledBack).toBe(true);
+    expect(state.renderEnv.get("MONGODB_URI")).toBe(LEAKED_URI);
+    expect(state.renderDeploys.map((d) => d.status)).toEqual(["build_failed"]);
+    expect([...state.atlasUsers.keys()]).toEqual(["collabify"]);
+  });
+
+  it("redeploys the old values when the health check fails after a Render deploy", async () => {
+    const { state, fetchImpl } = setup();
+    state.healthy = false;
+    const result = await execute(buildPlans(leaked(), renderCfg, renderCreds, fetchImpl).plans[0]!);
+
+    expect(result.rolledBack).toBe(true);
+    expect(state.renderEnv.get("MONGODB_URI")).toBe(LEAKED_URI);
+    expect(state.renderDeploys.map((d) => d.status)).toEqual(["live", "live"]);
+    expect([...state.atlasUsers.keys()]).toEqual(["collabify"]);
+  });
+
+  it("refuses to guess when both Vercel and Render are configured", () => {
+    const { fetchImpl } = setup();
+    const both = { ...renderCfg, vercel: { project: "collabify-backend" } };
+    const { plans, manual } = buildPlans(leaked(), both, { ...renderCreds, vercelToken: "v" }, fetchImpl);
+    expect(plans).toEqual([]);
+    expect(manual[0]!.reason).toContain("both vercel and render");
+  });
+
+  it("init finds the Render service that deploys this repo, and its health URL", async () => {
+    const { fetchImpl } = setup();
+    const result = await init({
+      root: "/work/collabify-backend", leaked: leaked(), existing: {}, gitRepo: "safayet404/collabify-backend",
+      creds: renderCreds, fetchImpl,
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.config).toEqual({ render: { serviceId: "srv-1" }, healthUrl: "https://app.example.com/api/health", atlas: { groupId: "g1" } });
+  });
+});
