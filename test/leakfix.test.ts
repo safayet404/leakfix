@@ -44,6 +44,11 @@ describe("detection", () => {
     expect(f[0]!.key).toBeUndefined();
   });
 
+  it("ignores values produced by the shell at run time", () => {
+    const ci = `export JWT_SECRET=$(openssl rand -base64 48)\nJWT_REFRESH_SECRET=$GENERATED\nMONGODB_URI=\${MONGO_URL}\n`;
+    expect(scanText(ci, ".github/workflows/ci.yml", true)).toEqual([]);
+  });
+
   it("skips lines marked leakfix:allow", () => {
     expect(scanText(`JWT_SECRET=fake_but_long_value # leakfix:allow`, ".env", true)).toHaveLength(0);
   });

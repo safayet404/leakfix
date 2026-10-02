@@ -45,4 +45,5 @@ export const RULES: Rule[] = [
 ];
 
 /** Values that are obviously placeholders, not real secrets. */
-export const PLACEHOLDER = /^(?:|changeme|change_me|your[_-].*|<.*>|\$\{.*\}|x+|\*+|example.*|dummy|test|secret|password|null|undefined)$/i;
+// Also shell expansions ($VAR, ${VAR}, $(command)): the value is produced at run time, not written down.
+export const PLACEHOLDER = /^(?:|changeme|change_me|your[_-].*|<.*>|\$\{.*\}|\$\(.*\)|\$[A-Za-z_]\w*|x+|\*+|example.*|dummy|test|secret|password|null|undefined)$/i;
