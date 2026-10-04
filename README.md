@@ -52,6 +52,18 @@ to finish by hand.
 
 Every step is written to `leakfix-audit.jsonl`. The log never contains secret values.
 
+## How is this different from…
+
+- **GitHub secret scanning, GitGuardian, TruffleHog, gitleaks** find leaks, and some
+  providers revoke a leaked key on the spot. Neither replaces the credential in
+  your deployment, so the app either stays exposed or goes down. leakfix is the
+  step after the alert. (Its scanner is deliberately simple; keep using those tools
+  to find leaks.)
+- **Vault, Doppler, Infisical, AWS Secrets Manager** rotate secrets they manage, on a
+  schedule. If you already use one, you probably don't need leakfix. It is for the
+  common case where secrets live in `.env` files and Vercel or Render environment
+  variables, and you need to rotate *now*, safely, without adopting a new platform.
+
 ## Supported
 
 | Secret | Rotation |
