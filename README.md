@@ -188,8 +188,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: safayet404/leakfix@main
+      - uses: safayet404/leakfix@v0.2.0
 ```
+
+Pin a release tag rather than `@main`, so a new commit here never runs in your CI
+until you choose to upgrade. Releases: https://github.com/safayet404/leakfix/releases
 
 Or run it in Docker, with nothing to install:
 
